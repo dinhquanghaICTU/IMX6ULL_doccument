@@ -42,6 +42,14 @@ B1: CÀI REPO TOOL (CHỈ CẦN LÀM 1 LẦN)
         repo init ...   # đọc file manifest XML
         repo sync       # tự clone tất cả 20+ repo về đúng version
 
+    
+
+
+    mkdir ~/bin
+    curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+    chmod a+x ~/bin/repo
+    PATH=${PATH}:~/bin
+
 ---
 
 B2: TẠO THƯ MỤC LÀM VIỆC VÀ DOWNLOAD SRC
