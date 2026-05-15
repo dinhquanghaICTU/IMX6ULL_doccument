@@ -47,10 +47,20 @@ tar xvf linux-4.1.15.tar.bz2
 
 Tải files script:
 
-```text
-fsl-imx-x11-glibc-x86_64-meta-toolchain-qt5-cortexa7hf-neon-toolchain-4.1.15-2.0.0.sh
-```
+lệnh này dùng để cấp quyền thực thi script
+chmod +x fsl-imx-x11-glibc-x86_64-meta-toolchain-qt5-cortexa7hf-neon-toolchain-4.1.15-2.0.0.sh
 
+
+script
+
+```text
+. /fsl-imx-x11-glibc-x86_64-meta-toolchain-qt5-cortexa7hf-neon-toolchain-4.1.15-2.0.0.sh
+```
+lệnh này gọi biến môi trường ra để biên dịch (mỗi tắt terminal đi muốn chạy được phải set nó lên)
+. /opt/fsl-imx-x11/4.1.15-2.0.0/environment-setup-cortexa7hf-neon-poky-linux-gnueabi
+
+
+lên
 Tải ở link này và cho nó vào thư mục `work`:
 
 ```text
@@ -104,6 +114,9 @@ ls
 
 Dùng sẵn files config của hãng nó sẽ tích hợp đầy đủ các module và driver trên board, rất nặng nếu full option.
 
+
+
+
 Tạo `.config` từ config của hãng:
 
 ```bash
@@ -111,6 +124,8 @@ make imx6ull_defconfig
 ```
 
 Lệnh này sẽ build `zImage`, `dtbs` và `modules`:
+
+- mục đích của make dtbs là sau khi sửa thêm hay xóa driver ta phải make dtbs lại mới config ta đã chỉnh.
 
 ```bash
 make -j$(nproc) zImage dtbs modules
@@ -126,6 +141,12 @@ Lệnh này là tạo files config mới lấy `.config` của hãng làm nền 
 cp .config arch/arm/configs/test_defconfig
 ```
 
+
+
+- trước khi chạy ta cần cài các package cần thiết để có thể  dùng được menuconfig
+apt update
+apt install libncurses5-dev libncursesw5-dev -y
+
 Mình có thể dùng gui để config:
 
 ```bash
@@ -139,6 +160,10 @@ make test_defconfig
 ```
 
 Lệnh này sẽ build `zImage`, `dtbs` và `modules`, là các file có `<M>` trong files config mà mình vừa chỉnh:
+
+- đến đoạn này có thể thiếu các package nên cần cài 
+apt update
+apt install lzop -y
 
 ```bash
 make -j$(nproc) zImage dtbs modules
@@ -249,51 +274,120 @@ Sau khi làm đến đây muốn đơn giản hơn nữa thì nén nó thành fi
 
 ```bash
 cd /home/forlinx/release_wifi
+```
 
-IMG=rootfs_wifi.wic
-ROOTFS=rootfs-console.tar.bz2
-BOOT_MNT=/mnt/wic_boot
-ROOT_MNT=/mnt/wic_root
+Tạo file script `create_rootfs_wifi_wic.sh` cùng cấp với `zImage`, `okmx6ull-s-emmc.dtb`, `rootfs-console.tar.bz2`:
 
-rm -f $IMG
+```bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-# Tạo image 2GB
-dd if=/dev/zero of=$IMG bs=1M count=2048
+IMG="${IMG:-rootfs_wifi.wic}"
+ROOTFS="${ROOTFS:-rootfs-console.tar.bz2}"
+KERNEL="${KERNEL:-zImage}"
+DTB="${DTB:-okmx6ull-s-emmc.dtb}"
+IMAGE_SIZE_MB="${IMAGE_SIZE_MB:-2048}"
+BOOT_START="${BOOT_START:-8MiB}"
+BOOT_END="${BOOT_END:-128MiB}"
+BOOT_MNT="${BOOT_MNT:-/mnt/wic_boot}"
+ROOT_MNT="${ROOT_MNT:-/mnt/wic_root}"
 
-# Tạo partition table:
-# p1: FAT boot, chứa zImage + dtb
-# p2: ext4 rootfs
-parted -s $IMG mklabel msdos
-parted -s $IMG mkpart primary fat32 8MiB 128MiB
-parted -s $IMG set 1 boot on
-parted -s $IMG mkpart primary ext4 128MiB 100%
+LOOP_DEV=""
+BOOT_MOUNTED=0
+ROOT_MOUNTED=0
 
-# Gắn image thành loop device
-LOOP=$(losetup --find --show -P $IMG)
-echo $LOOP
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
 
-# Format partition
-mkfs.vfat -F 32 -n boot ${LOOP}p1
-mkfs.ext4 -F -L rootfs ${LOOP}p2
+need_cmd() {
+    command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"
+}
 
-# Mount
-mkdir -p $BOOT_MNT $ROOT_MNT
-mount ${LOOP}p1 $BOOT_MNT
-mount ${LOOP}p2 $ROOT_MNT
+cleanup() {
+    set +e
+    sync
+    if [ "$BOOT_MOUNTED" = "1" ]; then
+        sudo umount "$BOOT_MNT"
+    fi
+    if [ "$ROOT_MOUNTED" = "1" ]; then
+        sudo umount "$ROOT_MNT"
+    fi
+    if [ -n "$LOOP_DEV" ]; then
+        sudo losetup -d "$LOOP_DEV"
+    fi
+}
 
-# Copy kernel + dtb vào boot FAT
-cp zImage $BOOT_MNT/
-cp okmx6ull-s-emmc.dtb $BOOT_MNT/
+trap cleanup EXIT
 
-# Bung rootfs vào partition ext4
-tar xpf $ROOTFS -C $ROOT_MNT
+need_cmd dd
+need_cmd parted
+need_cmd losetup
+need_cmd mkfs.vfat
+need_cmd mkfs.ext4
+need_cmd mount
+need_cmd tar
+need_cmd sudo
 
+[ -f "$ROOTFS" ] || die "Cannot find rootfs archive: $ROOTFS"
+[ -f "$KERNEL" ] || die "Cannot find kernel image: $KERNEL"
+[ -f "$DTB" ] || die "Cannot find DTB file: $DTB"
+
+echo "Input files:"
+echo "  kernel : $KERNEL"
+echo "  dtb    : $DTB"
+echo "  rootfs : $ROOTFS"
+echo
+
+if [ -e "$IMG" ]; then
+    echo "Remove old image: $IMG"
+    rm -f "$IMG"
+fi
+
+echo "Create empty image: $IMG (${IMAGE_SIZE_MB}MB)"
+dd if=/dev/zero of="$IMG" bs=1M count="$IMAGE_SIZE_MB" status=progress
+
+echo "Create MBR partition table"
+parted -s "$IMG" mklabel msdos
+parted -s "$IMG" mkpart primary fat32 "$BOOT_START" "$BOOT_END"
+parted -s "$IMG" set 1 boot on
+parted -s "$IMG" mkpart primary ext4 "$BOOT_END" 100%
+
+echo "Attach loop device"
+LOOP_DEV="$(sudo losetup --find --show -P "$IMG")"
+echo "  loop: $LOOP_DEV"
+
+echo "Format partitions"
+sudo mkfs.vfat -F 32 -n BOOT "${LOOP_DEV}p1"
+sudo mkfs.ext4 -F -L rootfs "${LOOP_DEV}p2"
+
+echo "Mount partitions"
+sudo mkdir -p "$BOOT_MNT" "$ROOT_MNT"
+sudo mount "${LOOP_DEV}p1" "$BOOT_MNT"
+BOOT_MOUNTED=1
+sudo mount "${LOOP_DEV}p2" "$ROOT_MNT"
+ROOT_MOUNTED=1
+
+echo "Copy boot files"
+sudo cp "$KERNEL" "$BOOT_MNT/"
+sudo cp "$DTB" "$BOOT_MNT/"
+
+echo "Extract rootfs"
+sudo tar --numeric-owner -xpf "$ROOTFS" -C "$ROOT_MNT"
+
+echo "Flush data"
 sync
 
-# Umount
-umount $BOOT_MNT
-umount $ROOT_MNT
-losetup -d $LOOP
+echo "Image created successfully:"
+ls -lh "$IMG"
+```
+
+Chạy script:
+
+```bash
+chmod +x create_rootfs_wifi_wic.sh
+./create_rootfs_wifi_wic.sh
 ```
 
 Sau khi nó chạy xong sẽ tạo ra file:
@@ -309,4 +403,3 @@ Bắt đầu đến bước flash cho board để xem thành quả.
 ```text
 /OKM6ULL-S/How_to_flash_OKM6ULL-S.md
 ```
-
