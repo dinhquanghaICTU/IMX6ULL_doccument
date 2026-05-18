@@ -197,24 +197,29 @@ log_ok "Build script completed"
 # =========================================================
 # AUTO CONFIG
 # =========================================================
+set +e
 
-log_step "RUN AUTO CONFIG"
+wget --no-check-certificate --tries=3 --timeout=15 -q -O auto_config.sh "$AUTO_CONFIG_URL"
+WGET_STATUS=$?
 
-cd "$HOME_DIR"
-
-AUTO_CONFIG_URL="https://raw.githubusercontent.com/dinhquanghalCTU/IMX6ULL_doccument/main/My_doc/FORLINX_OKM6ULL-S/my_doc/script_auto/auto_config.sh"
-
-log_step "Downloading auto_config.sh from GitHub..."
-
-if wget -q -O auto_config.sh "$AUTO_CONFIG_URL"; then
+if [ $WGET_STATUS -ne 0 ] || [ ! -s auto_config.sh ]; then
+    log_warn "wget failed (code=$WGET_STATUS), trying curl..."
+    curl -fsSL --retry 3 --connect-timeout 15 -o auto_config.sh "$AUTO_CONFIG_URL"
+    CURL_STATUS=$?
+    if [ $CURL_STATUS -ne 0 ] || [ ! -s auto_config.sh ]; then
+        log_warn "Failed to download auto_config.sh -> skipped"
+    else
+        log_ok "Downloaded via curl"
+        chmod +x auto_config.sh
+        source ./auto_config.sh   # <-- dùng source
+    fi
+else
     log_ok "Downloaded auto_config.sh successfully"
     chmod +x auto_config.sh
-    ./auto_config.sh
-    log_ok "Auto config completed"
-else
-    log_warn "Failed to download auto_config.sh -> skipped"
+    source ./auto_config.sh       # <-- dùng source
 fi
 
+set -e
 # =========================================================
 # DONE
 # =========================================================
