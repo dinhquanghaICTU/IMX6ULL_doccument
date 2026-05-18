@@ -202,16 +202,17 @@ log_step "RUN AUTO CONFIG"
 
 cd "$HOME_DIR"
 
-if [ -f "auto_config.sh" ]; then
+AUTO_CONFIG_URL="https://raw.githubusercontent.com/dinhquanghalCTU/IMX6ULL_doccument/main/My_doc/FORLINX_OKM6ULL-S/my_doc/script_auto/auto_config.sh"
 
+log_step "Downloading auto_config.sh from GitHub..."
+
+if wget -q -O auto_config.sh "$AUTO_CONFIG_URL"; then
+    log_ok "Downloaded auto_config.sh successfully"
     chmod +x auto_config.sh
-
     ./auto_config.sh
-
     log_ok "Auto config completed"
-
 else
-    log_warn "auto_config.sh not found -> skipped"
+    log_warn "Failed to download auto_config.sh -> skipped"
 fi
 
 # =========================================================
@@ -227,9 +228,3 @@ echo -e "${NC}"
 
 echo "Kernel source : $WORK_DIR/linux-4.1.15"
 echo "Toolchain     : $TOOLCHAIN_DIR"
-
-echo
-echo "Next:"
-echo "cd $WORK_DIR"
-echo "./imx6ull_build.sh"
-echo
