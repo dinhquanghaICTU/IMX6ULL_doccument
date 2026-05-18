@@ -10,7 +10,7 @@ from urllib.parse import parse_qs
 HOST = "0.0.0.0"
 PORT = 8080
 
-MQTT_HOST = "192.168.0.100"
+MQTT_HOST = "192.168.1.66"
 MQTT_PORT = "1883"
 MQTT_TOPIC = "test/topic"
 

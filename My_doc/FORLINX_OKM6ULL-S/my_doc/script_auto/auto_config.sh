@@ -676,38 +676,47 @@ cat > $ROOTFS/etc/rc.local <<'EOF'
 (
 while true
 do
-if ! ip a show wlan0 | grep -q "inet "; then
+    if ! ip a show wlan0 | grep -q "inet "; then
 
-```
-    echo "WiFi reconnect"
+        echo "WiFi reconnect"
 
-    killall wpa_supplicant 2>/dev/null
+        killall wpa_supplicant 2>/dev/null
 
-    ifconfig wlan0 up
+        ifconfig wlan0 up
 
-    wpa_supplicant -B \
-        -i wlan0 \
-        -c /etc/wpa_supplicant/wpa_supplicant.conf
+        wpa_supplicant -B \
+            -i wlan0 \
+            -c /etc/wpa_supplicant/wpa_supplicant.conf
 
-    sleep 5
+        sleep 5
 
-    udhcpc -i wlan0 -n -q
-fi
+        udhcpc -i wlan0 -n -q
+    fi
 
-sleep 10
-```
-
+    sleep 10
 done
 ) &
 
 (
-sleep 10
-/usr/bin/mqtt_led_app
+while true
+do
+    if ip a show wlan0 | grep -q "inet "; then
+
+        echo "WiFi ready -> start mqtt_led_app"
+
+        /usr/bin/mqtt_led_app
+
+        echo "mqtt_led_app exited -> restart"
+    else
+        echo "Waiting WiFi..."
+    fi
+
+    sleep 5
+done
 ) &
 
 exit 0
 EOF
-
 chmod +x $ROOTFS/etc/rc.local
 
 echo "================= repack rootfs ================="
