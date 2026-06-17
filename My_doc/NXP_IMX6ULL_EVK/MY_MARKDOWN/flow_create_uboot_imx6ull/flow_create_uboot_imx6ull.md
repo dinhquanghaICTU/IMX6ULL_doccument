@@ -950,7 +950,117 @@ Lưu ý: `boot_data.start` không phải địa chỉ trên eMMC. Nó là địa
 
 ---
 
-## 10. Boot Data size được tính như nào
+## 10. Linker script, start.S và IVT.entry liên quan như nào
+
+Chỗ này phải tách rõ 2 thời điểm:
+
+```txt
+build-time  = lúc build U-Boot trên PC
+runtime     = lúc board boot thật
+```
+
+File linker script của U-Boot ARM:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/build-fb/tmp/work/okmx6ull_s_emmc-poky-linux-gnueabi/u-boot-imx/2022.04-r0/git/arch/arm/cpu/u-boot.lds
+```
+
+Trong đó có:
+
+```ld
+ENTRY(_start)
+```
+
+`ENTRY(_start)` không phải lệnh chạy trên board. Nó là chỉ dẫn cho linker ở lúc build:
+
+```txt
+ELF entry symbol là _start
+```
+
+Symbol `_start` được định nghĩa trong:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/build-fb/tmp/work/okmx6ull_s_emmc-poky-linux-gnueabi/u-boot-imx/2022.04-r0/git/arch/arm/cpu/armv7/start.S
+```
+
+Luồng build:
+
+```txt
+start.S
+        |
+        | assembler
+        v
+start.o có symbol _start
+        |
+        v
+linker dùng u-boot.lds
+        |
+        v
+ENTRY(_start) chọn _start làm entry symbol của ELF
+        |
+        v
+u-boot ELF
+        |
+        v
+u-boot.bin
+```
+
+Boot ROM không hiểu tên `_start`. Boot ROM chỉ đọc địa chỉ số trong IVT:
+
+```txt
+IVT.entry = 0x87800000
+```
+
+Địa chỉ này được đưa vào IVT từ flow `mkimage`:
+
+```txt
+CONFIG_SYS_TEXT_BASE = 0x87800000
+        |
+        v
+Makefile truyền -e 0x87800000 cho mkimage
+        |
+        v
+mkimage: params->ep = 0x87800000
+        |
+        v
+set_imx_hdr_v2(): fhdr_v2->entry = entry_point
+        |
+        v
+IVT.entry = 0x87800000
+```
+
+Luồng runtime:
+
+```txt
+Boot ROM đọc IVT.entry
+        |
+        v
+jump tới 0x87800000
+        |
+        v
+code tại _start trong start.S bắt đầu chạy
+```
+
+Tóm lại:
+
+```txt
+u-boot.lds / ENTRY(_start)  dùng lúc build để linker biết entry symbol.
+IVT.entry                  dùng lúc boot để Boot ROM biết địa chỉ nhảy vào.
+_start                     là symbol trong start.S, không phải thứ Boot ROM đọc theo tên.
+```
+
+Hai bên phải khớp:
+
+```txt
+_start được link ở 0x87800000
+IVT.entry cũng là 0x87800000
+```
+
+Nếu lệch, Boot ROM sẽ jump sai địa chỉ.
+
+---
+
+## 11. Boot Data size được tính như nào
 
 Sau khi `header_size_ptr` trỏ tới:
 
@@ -987,7 +1097,7 @@ Tức là Boot ROM sẽ load full image vào DDR:
 
 ---
 
-## 11. Layout của u-boot.imx
+## 12. Layout của u-boot.imx
 
 Nhìn tổng quan, `u-boot.imx` được pack theo dạng:
 
@@ -1076,7 +1186,7 @@ Boot Data:
 
 ---
 
-## 12. Boot ROM dùng các thông tin này như nào
+## 13. Boot ROM dùng các thông tin này như nào
 
 Trước DCD, DDR chưa dùng được. Vì vậy Boot ROM không thể đọc trực tiếp các địa chỉ DDR như:
 
@@ -1137,7 +1247,7 @@ entry = 0x87800000
 
 ---
 
-## 13. Tóm tắt cuối
+## 14. Tóm tắt cuối
 
 Flow tạo `u-boot.imx`:
 

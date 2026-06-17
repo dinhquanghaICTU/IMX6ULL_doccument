@@ -582,6 +582,209 @@ nếu không bị stop autoboot thì chạy bootcmd
 nếu bị stop thì vào cli_loop()
 ```
 
+Giải thích chi tiết từng bước:
+
+```txt
+main_loop()
+```
+
+Đây là vòng lặp chính của U-Boot sau `board_init_r()`. Tới đây U-Boot đã có console, env, command subsystem và các device cơ bản.
+
+```txt
+bootstage_mark_name(BOOTSTAGE_ID_MAIN_LOOP, "main_loop")
+```
+
+Đánh dấu bootstage để debug/profiling. Nó không quyết định boot kernel.
+
+```txt
+env_set("ver", version_string)
+```
+
+Nếu bật `CONFIG_VERSION_VARIABLE`, U-Boot tạo biến môi trường:
+
+```txt
+ver=<U-Boot version string>
+```
+
+Sau này có thể kiểm tra bằng:
+
+```txt
+printenv ver
+```
+
+```txt
+cli_init()
+```
+
+Khởi tạo command line interface của U-Boot. Nói đơn giản là chuẩn bị bộ parser để chạy được các command:
+
+```txt
+printenv
+setenv
+mmc
+fatload
+ext4load
+bootz
+bootm
+saveenv
+```
+
+```txt
+run_preboot_environment_command()
+```
+
+Nếu bật `CONFIG_USE_PREBOOT`, U-Boot tìm biến env:
+
+```txt
+preboot
+```
+
+rồi chạy nó trước khi autoboot. Biến này thường dùng để setup trạng thái board, màn hình, USB, network hoặc các bước đặc biệt trước boot.
+
+```txt
+s = bootdelay_process()
+```
+
+Đây là bước chọn chuỗi lệnh boot. Kết quả trả về là con trỏ `s`.
+
+Ví dụ:
+
+```txt
+s = env_get("bootcmd")
+```
+
+hoặc nếu boot lỗi nhiều lần:
+
+```txt
+s = env_get("altbootcmd")
+```
+
+hoặc nếu POST fail:
+
+```txt
+s = env_get("failbootcmd")
+```
+
+Với NXP/i.MX, nếu đang ở USB/mfgtools/UUU path thì có thể chuyển sang:
+
+```txt
+bootcmd_mfg
+fastboot 0
+```
+
+```txt
+cli_process_fdt(&s)
+```
+
+Nếu device tree có cấu hình boot command đặc biệt, bước này có thể chỉnh lại `s`.
+
+```txt
+cli_secure_boot_cmd(s)
+```
+
+Nếu secure boot path yêu cầu xử lý command riêng, nó đi qua đây. Với boot thường, có thể hiểu đây là nhánh phụ.
+
+```txt
+autoboot_command(s)
+```
+
+Đây là nơi U-Boot quyết định có tự chạy `bootcmd` không.
+
+Điều kiện chính:
+
+```txt
+có command s
+và bootdelay cho phép autoboot
+và user không bấm phím stop autoboot
+```
+
+Nếu thỏa điều kiện, U-Boot chạy:
+
+```c
+run_command_list(s, -1, 0);
+```
+
+`run_command_list()` sẽ parse và chạy chuỗi command trong `bootcmd`.
+
+Ví dụ `bootcmd` có thể là:
+
+```txt
+mmc dev 1;
+ext4load mmc 1:1 ${loadaddr} /boot/zImage;
+ext4load mmc 1:1 ${fdt_addr} /boot/imx6ull.dtb;
+setenv bootargs console=ttymxc0,115200 root=/dev/mmcblk1p2 rootwait rw;
+bootz ${loadaddr} - ${fdt_addr}
+```
+
+Nó sẽ chạy lần lượt:
+
+```txt
+mmc dev 1
+ext4load kernel
+ext4load dtb
+set bootargs
+bootz
+```
+
+Nếu tới `bootz` thành công, U-Boot nhảy sang kernel và không quay lại.
+
+```txt
+cli_loop()
+```
+
+Nếu user bấm phím stop autoboot, hoặc `bootcmd` không chạy/return về, U-Boot rơi vào command line interactive:
+
+```txt
+=>
+```
+
+Lúc này có thể gõ tay:
+
+```txt
+printenv
+mmc list
+mmc dev 1
+ext4ls mmc 1:1 /
+bootz ${loadaddr} - ${fdt_addr}
+```
+
+Tóm tắt nhánh quyết định:
+
+```txt
+main_loop()
+        |
+        v
+bootdelay_process() chọn command s
+        |
+        v
+autoboot_command(s)
+        |
+        +-- user không stop
+        |       |
+        |       v
+        |   run_command_list(s)
+        |       |
+        |       v
+        |   boot kernel nếu bootcmd thành công
+        |
+        +-- user stop hoặc bootcmd return/fail
+                |
+                v
+            cli_loop()
+                |
+                v
+            prompt U-Boot =>
+```
+
+Câu nhớ nhanh:
+
+```txt
+bootdelay_process() chọn sẽ chạy lệnh gì.
+autoboot_command() quyết định có chạy không.
+run_command_list() thực thi bootcmd.
+cli_loop() là chế độ gõ lệnh tay.
+```
+
 ---
 
 ## 10. `bootdelay_process()`: lấy `bootcmd`
@@ -753,13 +956,140 @@ else
 kernel_entry(0, machid, r2);
 ```
 
-Với device tree:
+Giải thích từng dòng:
+
+```c
+void (*kernel_entry)(int zero, int arch, uint params);
+```
+
+Đây là khai báo một function pointer tên `kernel_entry`.
+
+Nó nói với C rằng:
+
+```txt
+kernel_entry là một địa chỉ có thể gọi như hàm
+hàm đó nhận 3 tham số:
+  int zero
+  int arch
+  uint params
+```
+
+Thực tế đây không phải hàm C bình thường trong U-Boot. Đây là cách U-Boot biểu diễn địa chỉ entry của Linux kernel để lát nữa gọi/jump vào đó.
+
+```c
+kernel_entry = (void (*)(int, int, uint))images->ep;
+```
+
+`images->ep` là entry point của kernel đã được chuẩn bị trước đó.
+
+Với `bootz`, `images->ep` thường lấy từ địa chỉ zImage mà lệnh `bootz` nhận:
+
+```txt
+bootz ${loadaddr} - ${fdt_addr}
+       |
+       v
+images->ep = ${loadaddr}
+```
+
+Dòng trên ép kiểu địa chỉ số `images->ep` thành function pointer:
+
+```txt
+images->ep = địa chỉ kernel trong RAM
+kernel_entry = con trỏ hàm trỏ tới địa chỉ kernel đó
+```
+
+```c
+if (CONFIG_IS_ENABLED(OF_LIBFDT) && images->ft_len)
+	r2 = (unsigned long)images->ft_addr;
+else
+	r2 = gd->bd->bi_boot_params;
+```
+
+Đây là đoạn chọn tham số thứ ba truyền cho kernel.
+
+Nếu boot bằng device tree:
+
+```txt
+images->ft_len != 0
+images->ft_addr = địa chỉ DTB/FDT trong RAM
+```
+
+thì:
+
+```txt
+r2 = images->ft_addr
+```
+
+Nếu không có FDT, U-Boot dùng cơ chế cũ ATAGS:
+
+```txt
+r2 = gd->bd->bi_boot_params
+```
+
+Với i.MX6ULL Linux hiện đại, thường dùng FDT/DTB, nên case chính là:
+
+```txt
+r2 = địa chỉ file .dtb đã load vào RAM
+```
+
+```c
+kernel_entry(0, machid, r2);
+```
+
+Dòng này là cú jump vào kernel.
+
+Theo ARM Linux boot protocol 32-bit, trước khi nhảy vào kernel:
 
 ```txt
 r0 = 0
 r1 = machid
-r2 = địa chỉ FDT
-pc = images->ep
+r2 = địa chỉ FDT hoặc ATAGS
+pc = kernel entry
+```
+
+Trong C, khi gọi:
+
+```c
+kernel_entry(0, machid, r2);
+```
+
+compiler sẽ đặt tham số vào thanh ghi ARM như sau:
+
+```txt
+tham số 1 -> r0 = 0
+tham số 2 -> r1 = machid
+tham số 3 -> r2 = images->ft_addr hoặc bi_boot_params
+```
+
+rồi branch tới địa chỉ:
+
+```txt
+kernel_entry = images->ep
+```
+
+Với device tree, flow cụ thể là:
+
+```txt
+bootcmd load zImage vào ${loadaddr}
+bootcmd load dtb vào ${fdt_addr}
+        |
+        v
+bootz ${loadaddr} - ${fdt_addr}
+        |
+        v
+images->ep      = ${loadaddr}
+images->ft_addr = ${fdt_addr}
+images->ft_len  > 0
+        |
+        v
+kernel_entry = images->ep
+r2 = images->ft_addr
+        |
+        v
+kernel_entry(0, machid, r2)
+        |
+        v
+Linux kernel bắt đầu chạy và đọc DTB ở r2
 ```
 
 Từ đây quyền điều khiển chuyển sang Linux kernel.
