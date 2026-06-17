@@ -36,6 +36,7 @@ Các tài liệu đáng chú ý:
 - [`MY_MARKDOWN/`](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/) — Ghi chú tự tổng hợp theo workflow đang làm.
 - [Setup build image bằng Yocto/NXP](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/build_image/general_setup.md)
 - [Flow tạo `u-boot.imx` cho i.MX6ULL](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_create_uboot_imx6ull/flow_create_uboot_imx6ull.md) — Lần theo `defconfig`, `Kconfig`, `Makefile`, `mkimage`, `imximage.c`, IVT, Boot Data và DCD.
+- [Flow sau khi Boot ROM jump vào U-Boot `_start`](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_jump_uboot/flow_jump_uboot.md) — Lần theo `_start`, `start.S`, `crt0.S`, `board_init_f`, relocation, `board_init_r`, `main_loop`, `bootcmd`, `bootz/bootm` và jump vào kernel.
 - [Flash bằng UUU](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/uuu_flash/uuu_flash.md)
 - [Flash firmware NOR bằng UUU](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/uuu_flash/uuu_flash_firmware_nor.md)
 - [Fastboot](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/boot_script/Fastboot.md)
@@ -153,6 +154,12 @@ Nếu câu hỏi liên quan flow tạo `u-boot.imx`, IVT, Boot Data, DCD:
 1. Đọc [`My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_create_uboot_imx6ull/flow_create_uboot_imx6ull.md`](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_create_uboot_imx6ull/flow_create_uboot_imx6ull.md)
 2. Đọc [`My_doc/NXP_IMX6ULL_EVK/MARKDOWN_DOC_NXP/i.MX_6ULL_Applications_Processor_Reference_Manual/Chapter_8_System_Boot.md`](My_doc/NXP_IMX6ULL_EVK/MARKDOWN_DOC_NXP/i.MX_6ULL_Applications_Processor_Reference_Manual/Chapter_8_System_Boot.md)
 3. Đọc [`My_doc/NXP_IMX6ULL_EVK/MARKDOWN_DOC_NXP/Example/config_DCD_OKMX6ULL-S.md`](My_doc/NXP_IMX6ULL_EVK/MARKDOWN_DOC_NXP/Example/config_DCD_OKMX6ULL-S.md)
+
+Nếu câu hỏi liên quan U-Boot chạy gì sau `_start`:
+
+1. Đọc [`My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_jump_uboot/flow_jump_uboot.md`](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_jump_uboot/flow_jump_uboot.md)
+2. Đọc [`My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_create_uboot_imx6ull/flow_create_uboot_imx6ull.md`](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_create_uboot_imx6ull/flow_create_uboot_imx6ull.md)
+3. Đọc [`My_doc/NXP_IMX6ULL_EVK/MARKDOWN_DOC_NXP/i.MX_6ULL_Applications_Processor_Reference_Manual/Chapter_8_System_Boot.md`](My_doc/NXP_IMX6ULL_EVK/MARKDOWN_DOC_NXP/i.MX_6ULL_Applications_Processor_Reference_Manual/Chapter_8_System_Boot.md)
 
 Nếu câu hỏi liên quan flash bằng UUU:
 
