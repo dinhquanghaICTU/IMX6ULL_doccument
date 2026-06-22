@@ -201,6 +201,24 @@ BOOT_FROM	sd
 
 Sau khi chạy rule `%.cfgout`, build system dùng C preprocessor để xử lý các điều kiện này.
 
+> **Ghi chú về thiết bị boot:** Trước khi đến bước này, `defconfig` đã cung cấp các lựa chọn dùng để build image. C preprocessor đọc các macro `CONFIG_*` được sinh từ `.config` rồi chọn đúng một dòng `BOOT_FROM`.
+>
+> ```txt
+> CONFIG_QSPI_BOOT=y  -> BOOT_FROM qspi
+> CONFIG_NOR_BOOT=y   -> BOOT_FROM nor
+> không bật hai config trên -> BOOT_FROM sd
+> ```
+>
+> Với cấu hình boot từ eMMC của board em, image đi vào nhánh cuối và nhận:
+>
+> ```txt
+> BOOT_FROM sd
+> ```
+>
+> Trong `imximage`, từ khóa `sd` được dùng chung cho kiểu đóng gói SD/eMMC vì cả hai đi qua giao diện USDHC và dùng cùng IVT offset/initial load layout. Điều này không có nghĩa eMMC trở thành SD; nó chỉ có nghĩa `mkimage` dùng layout `sd` để tạo image cho cả SD và eMMC.
+>
+> `BOOT_FROM sd` chỉ quyết định cách **đóng gói** `u-boot.imx`. Khi board chạy thật, Boot ROM vẫn xác định thiết bị boot thực tế từ BOOT_MODE pin/eFuse. Cấu hình phần cứng và layout image phải khớp nhau.
+
 Với board của em, nếu không bật:
 
 ```txt
@@ -243,6 +261,34 @@ mkimage -n u-boot.cfgout ...
 ```
 
 chứ không truyền trực tiếp raw `imximage.cfg`.
+
+Lệnh `mkimage` đã được Make expand đầy đủ và lưu tại:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/build-fb/tmp/work/okmx6ull_s_emmc-poky-linux-gnueabi/u-boot-imx/2022.04-r0/build/okmx6ull_s_emmc_defconfig/.u-boot.imx.cmd
+```
+
+Path raw:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/build-fb/tmp/work/okmx6ull_s_emmc-poky-linux-gnueabi/u-boot-imx/2022.04-r0/build/okmx6ull_s_emmc_defconfig/.u-boot.imx.cmd
+```
+
+Nơi định nghĩa rule và các tham số để Make sinh ra lệnh trên:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/build-fb/tmp/work/okmx6ull_s_emmc-poky-linux-gnueabi/u-boot-imx/2022.04-r0/git/arch/arm/mach-imx/Makefile
+```
+
+Trong đó:
+
+```make
+MKIMAGEFLAGS_u-boot.imx = -n $(filter-out $(PLUGIN).bin $(QSPI_HEADER) $< $(PHONY),$^) \
+	-T $(IMAGE_TYPE) -e $(CONFIG_SYS_TEXT_BASE)
+
+u-boot.imx: u-boot.bin u-boot.cfgout $(PLUGIN).bin $(QSPI_HEADER) FORCE
+	$(call if_changed,mkimage)
+```
 
 ---
 
@@ -383,6 +429,137 @@ nó biến chuỗi `imximage` thành image type ID:
 IH_TYPE_IMXIMAGE
 ```
 
+### 7.1. `genimg_get_type_id()` lấy `IH_TYPE_IMXIMAGE` ở đâu
+
+Trong:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/build-fb/tmp/work/okmx6ull_s_emmc-poky-linux-gnueabi/u-boot-imx/2022.04-r0/git/include/image.h
+```
+
+chỉ có prototype:
+
+```c
+int genimg_get_type_id(const char *name);
+```
+
+Prototype chỉ báo cho compiler biết hàm tồn tại. Phần định nghĩa thật nằm trong:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/build-fb/tmp/work/okmx6ull_s_emmc-poky-linux-gnueabi/u-boot-imx/2022.04-r0/git/boot/image.c
+```
+
+```c
+int genimg_get_type_id(const char *name)
+{
+	return get_table_entry_id(uimage_type, "Image", name);
+}
+```
+
+Trong cùng file có bảng ánh xạ:
+
+```c
+static const table_entry_t uimage_type[] = {
+	...
+	{
+		IH_TYPE_IMXIMAGE,
+		"imximage",
+		"Freescale i.MX Boot Image",
+	},
+	...
+};
+```
+
+Mỗi phần tử có dạng:
+
+```txt
+ID                  tên ngắn       tên mô tả
+IH_TYPE_IMXIMAGE    "imximage"     "Freescale i.MX Boot Image"
+```
+
+Với option:
+
+```sh
+-T imximage
+```
+
+thì:
+
+```c
+optarg = "imximage";
+type = genimg_get_type_id(optarg);
+```
+
+tương đương:
+
+```c
+type = genimg_get_type_id("imximage");
+```
+
+`genimg_get_type_id()` gọi:
+
+```c
+get_table_entry_id(uimage_type, "Image", "imximage");
+```
+
+Hàm `get_table_entry_id()` duyệt toàn bộ bảng:
+
+```c
+for (t = table; t->id >= 0; ++t) {
+	if (t->sname &&
+	    !strcasecmp(t->sname, name))
+		return t->id;
+}
+```
+
+Khi tìm thấy phần tử:
+
+```c
+{ IH_TYPE_IMXIMAGE, "imximage", ... }
+```
+
+nó trả về:
+
+```c
+return IH_TYPE_IMXIMAGE;
+```
+
+Do đó kết quả cuối cùng là:
+
+```c
+type = IH_TYPE_IMXIMAGE;
+```
+
+Giá trị enum `IH_TYPE_IMXIMAGE` được khai báo trong:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/build-fb/tmp/work/okmx6ull_s_emmc-poky-linux-gnueabi/u-boot-imx/2022.04-r0/git/include/image.h
+```
+
+Flow:
+
+```txt
+-T imximage
+      |
+      v
+optarg = "imximage"
+      |
+      v
+genimg_get_type_id("imximage")
+      |
+      v
+get_table_entry_id(uimage_type, ...)
+      |
+      v
+duyệt bảng uimage_type[]
+      |
+      v
+tìm thấy "imximage" -> IH_TYPE_IMXIMAGE
+      |
+      v
+type = IH_TYPE_IMXIMAGE
+```
+
 Sau đó:
 
 ```c
@@ -390,6 +567,219 @@ tparams = imagetool_get_type(params.type);
 ```
 
 sẽ đi tìm handler nào support `IH_TYPE_IMXIMAGE`.
+
+### 7.2. Từ `IH_TYPE_IMXIMAGE` tìm sang handler trong `tools/imximage.c`
+
+Sau khi `process_args()` chạy xong:
+
+```c
+params.type = IH_TYPE_IMXIMAGE;
+```
+
+`main()` trong `tools/mkimage.c` gọi:
+
+```c
+tparams = imagetool_get_type(params.type);
+```
+
+Tương đương:
+
+```c
+tparams = imagetool_get_type(IH_TYPE_IMXIMAGE);
+```
+
+Path của `mkimage.c`:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/build-fb/tmp/work/okmx6ull_s_emmc-poky-linux-gnueabi/u-boot-imx/2022.04-r0/git/tools/mkimage.c
+```
+
+Hàm `imagetool_get_type()` nằm trong:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/build-fb/tmp/work/okmx6ull_s_emmc-poky-linux-gnueabi/u-boot-imx/2022.04-r0/git/tools/imagetool.c
+```
+
+Code chính:
+
+```c
+struct image_type_params *imagetool_get_type(int type)
+{
+	struct image_type_params **curr;
+	struct image_type_params **start = __start_image_type;
+	struct image_type_params **end = __stop_image_type;
+
+	for (curr = start; curr != end; curr++) {
+		if ((*curr)->check_image_type) {
+			if (!(*curr)->check_image_type(type))
+				return *curr;
+		}
+	}
+
+	return NULL;
+}
+```
+
+Nó không nhảy thẳng vào `tools/imximage.c`. Nó duyệt tất cả handler đã được đăng ký trong linker section:
+
+```txt
+image_type
+```
+
+Giới hạn của section được linker cung cấp bằng hai symbol:
+
+```txt
+__start_image_type
+__stop_image_type
+```
+
+Cuối file:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/build-fb/tmp/work/okmx6ull_s_emmc-poky-linux-gnueabi/u-boot-imx/2022.04-r0/git/tools/imximage.c
+```
+
+có macro đăng ký handler:
+
+```c
+U_BOOT_IMAGE_TYPE(
+	imximage,
+	"Freescale i.MX Boot Image support",
+	0,
+	NULL,
+	imximage_check_params,
+	imximage_verify_header,
+	imximage_print_header,
+	imximage_set_header,
+	NULL,
+	imximage_check_image_types,
+	NULL,
+	imximage_generate
+);
+```
+
+Macro `U_BOOT_IMAGE_TYPE()` được định nghĩa trong:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/build-fb/tmp/work/okmx6ull_s_emmc-poky-linux-gnueabi/u-boot-imx/2022.04-r0/git/tools/imagetool.h
+```
+
+Lúc compile `tools/mkimage`, macro này mở rộng gần giống:
+
+```c
+static struct image_type_params image_type_imximage = {
+	.name = "Freescale i.MX Boot Image support",
+	.check_params = imximage_check_params,
+	.verify_header = imximage_verify_header,
+	.print_header = imximage_print_header,
+	.set_header = imximage_set_header,
+	.check_image_type = imximage_check_image_types,
+	.vrec_header = imximage_generate,
+};
+
+static struct image_type_params *image_type_ptr_imximage
+	__attribute__((section("image_type"))) =
+	&image_type_imximage;
+```
+
+Dòng:
+
+```c
+__attribute__((section("image_type")))
+```
+
+đưa con trỏ tới `image_type_imximage` vào section `image_type`. Vì thế `imagetool_get_type()` có thể tìm thấy handler này khi duyệt section.
+
+Khi vòng lặp đến handler `imximage`, nó gọi:
+
+```c
+imximage_check_image_types(IH_TYPE_IMXIMAGE);
+```
+
+Hàm kiểm tra trong `tools/imximage.c`:
+
+```c
+static int imximage_check_image_types(uint8_t type)
+{
+	if (type == IH_TYPE_IMXIMAGE)
+		return EXIT_SUCCESS;
+	else
+		return EXIT_FAILURE;
+}
+```
+
+Do type đang đúng bằng:
+
+```c
+IH_TYPE_IMXIMAGE
+```
+
+hàm trả về:
+
+```c
+EXIT_SUCCESS /* bằng 0 */
+```
+
+Nên điều kiện trong `imagetool_get_type()` đúng:
+
+```c
+if (!(*curr)->check_image_type(type))
+	return *curr;
+```
+
+Kết quả:
+
+```c
+tparams = &image_type_imximage;
+```
+
+Từ đây `mkimage.c` mới gọi các callback trong `tools/imximage.c` thông qua `tparams`:
+
+```c
+tparams->check_params(...);  /* imximage_check_params() */
+tparams->vrec_header(...);   /* imximage_generate() */
+tparams->set_header(...);    /* imximage_set_header() */
+tparams->print_header(...);  /* imximage_print_header() */
+```
+
+Flow đầy đủ:
+
+```txt
+params.type = IH_TYPE_IMXIMAGE
+        |
+        v
+imagetool_get_type(IH_TYPE_IMXIMAGE)
+        |
+        v
+duyệt từ __start_image_type đến __stop_image_type
+        |
+        v
+đến handler image_type_imximage
+        |
+        v
+imximage_check_image_types(IH_TYPE_IMXIMAGE)
+        |
+        v
+return EXIT_SUCCESS
+        |
+        v
+tparams = &image_type_imximage
+        |
+        +-- imximage_check_params()
+        +-- imximage_generate()
+        +-- imximage_set_header()
+        `-- imximage_print_header()
+```
+
+Nút nối từ `IH_TYPE_IMXIMAGE` sang handler `tools/imximage.c` là:
+
+```txt
+imagetool_get_type()
+        +
+linker section image_type
+        +
+imximage_check_image_types()
+```
 
 Nói ngắn gọn:
 
@@ -1247,7 +1637,360 @@ entry = 0x87800000
 
 ---
 
-## 14. Tóm tắt cuối
+## 14. Sau khi U-Boot chạy: bootcmd, mmcdev và boot.scr
+
+Các phần trên là flow tạo `u-boot.imx` và flow Boot ROM load U-Boot.
+
+Sau khi Boot ROM jump vào:
+
+```txt
+entry = 0x87800000
+```
+
+thì code U-Boot bắt đầu chạy từ `_start`, đi qua init CPU, init C runtime, `board_init_f()`, relocation, `board_init_r()`. Sau khi U-Boot init xong, nó mới chạy biến môi trường:
+
+```txt
+bootcmd
+```
+
+`bootcmd` là script chính quyết định U-Boot sẽ load kernel, DTB và rootfs như nào.
+
+Với board của em, trong defconfig có:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/meta-okmx6ull/recipes-bsp/u-boot/files/okmx6ull_s_emmc_defconfig
+```
+
+Dòng:
+
+```txt
+CONFIG_BOOTCOMMAND="run findfdt;mmc dev ${mmcdev};mmc dev ${mmcdev}; if mmc rescan; then if run loadbootscript; then run bootscript; else if run loadimage; then run mmcboot; else run netboot; fi; fi; else run netboot; fi"
+```
+
+Khi build ra `.config`, dòng này nằm ở:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/build-fb/tmp/work/okmx6ull_s_emmc-poky-linux-gnueabi/u-boot-imx/2022.04-r0/build/okmx6ull_s_emmc_defconfig/.config
+```
+
+### 14.1. `mmcdev` là gì
+
+`mmcdev` là biến môi trường default của U-Boot. Nó được hãng/board config sẵn trong:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/build-fb/tmp/work/okmx6ull_s_emmc-poky-linux-gnueabi/u-boot-imx/2022.04-r0/git/include/configs/mx6ullevk.h
+```
+
+Đoạn default env:
+
+```c
+"mmcdev="__stringify(CONFIG_SYS_MMC_ENV_DEV)"\0" \
+"mmcpart=1\0" \
+"mmcroot=" CONFIG_MMCROOT " rootwait rw\0" \
+```
+
+Và giá trị `CONFIG_SYS_MMC_ENV_DEV` là:
+
+```c
+#define CONFIG_SYS_MMC_ENV_DEV 1 /* USDHC2 */
+```
+
+Nên default:
+
+```txt
+mmcdev=1
+```
+
+Ý nghĩa:
+
+```txt
+mmcdev=1  chọn MMC device số 1, thường là eMMC/USDHC2 trên board này
+mmcpart=1 chọn partition số 1, tức phân vùng /boot FAT
+```
+
+Nếu trên board đã từng `saveenv`, env lưu trong eMMC có thể override giá trị default này. Kiểm tra runtime bằng:
+
+```bash
+printenv mmcdev
+printenv bootcmd
+```
+
+### 14.2. Vì sao cần `mmc dev ${mmcdev}`
+
+Trong `bootcmd` có:
+
+```bash
+mmc dev ${mmcdev}
+```
+
+Nếu:
+
+```txt
+mmcdev=1
+```
+
+thì nó expand thành:
+
+```bash
+mmc dev 1
+```
+
+Lệnh này bảo U-Boot chọn thiết bị MMC/eMMC số 1 làm device đang active.
+
+Ví dụ board có thể có:
+
+```txt
+mmc 0  SD card / USDHC1
+mmc 1  eMMC    / USDHC2
+```
+
+Nếu không chọn đúng `mmc dev`, các lệnh sau có thể đọc nhầm thiết bị:
+
+```bash
+mmc rescan
+fatload mmc ${mmcdev}:${mmcpart} ${loadaddr} boot.scr
+fatload mmc ${mmcdev}:${mmcpart} ${loadaddr} zImage
+fatload mmc ${mmcdev}:${mmcpart} ${fdt_addr} ${fdt_file}
+```
+
+Tóm lại:
+
+```txt
+mmcdev      biến lưu số device cần boot
+mmc dev 1   chọn eMMC/USDHC2 làm device active
+mmc rescan  quét lại device đó
+fatload     đọc file từ partition của device đó
+```
+
+### 14.3. bootcmd chạy theo thứ tự nào
+
+`bootcmd` của em:
+
+```bash
+run findfdt;
+mmc dev ${mmcdev};
+mmc dev ${mmcdev};
+if mmc rescan; then
+    if run loadbootscript; then
+        run bootscript;
+    else
+        if run loadimage; then
+            run mmcboot;
+        else
+            run netboot;
+        fi;
+    fi;
+else
+    run netboot;
+fi
+```
+
+Vẽ ASCII:
+
+```txt
+bootcmd
+ |
+ |-- run findfdt
+ |     `-- chọn tên file DTB, ví dụ imx6ull-14x14-evk.dtb
+ |
+ |-- mmc dev ${mmcdev}
+ |     `-- chọn eMMC/SD device cần boot
+ |
+ |-- mmc rescan
+ |     `-- quét lại device đó
+ |
+ |-- run loadbootscript
+ |     `-- thử load boot.scr từ partition boot
+ |
+ |-- nếu có boot.scr:
+ |       run bootscript
+ |       `-- source boot.scr
+ |           `-- chạy logic boot trong boot.scr
+ |
+ `-- nếu không có boot.scr:
+         run loadimage
+         `-- load zImage
+
+         run mmcboot
+         |-- run mmcargs
+         |     `-- set bootargs cho kernel
+         |
+         |-- run loadfdt
+         |     `-- load DTB
+         |
+         `-- bootz ${loadaddr} - ${fdt_addr}
+             `-- jump vào Linux kernel
+```
+
+### 14.4. boot.scr liên quan gì với bootcmd
+
+Trong default env có:
+
+```c
+"loadbootscript=" \
+    "fatload mmc ${mmcdev}:${mmcpart} ${loadaddr} ${script};\0" \
+"bootscript=echo Running bootscript from mmc ...; " \
+    "source\0" \
+```
+
+Nếu:
+
+```txt
+mmcdev=1
+mmcpart=1
+script=boot.scr
+```
+
+thì:
+
+```bash
+run loadbootscript
+```
+
+sẽ tương đương:
+
+```bash
+fatload mmc 1:1 ${loadaddr} boot.scr
+```
+
+Nó tìm file `boot.scr` trong partition 1 của eMMC.
+
+Nếu load được `boot.scr`, U-Boot chạy:
+
+```bash
+run bootscript
+```
+
+tức là:
+
+```bash
+source
+```
+
+`source` sẽ thực thi script vừa được load vào `${loadaddr}`.
+
+Vì vậy:
+
+```txt
+bootcmd  là script chính nằm trong U-Boot env
+boot.scr là script phụ nằm trên phân vùng /boot
+```
+
+Quan hệ:
+
+```txt
+bootcmd
+ |
+ |-- ưu tiên tìm boot.scr
+ |
+ |-- nếu có boot.scr:
+ |       boot.scr quyết định load zImage nào, DTB nào, rootfs nào
+ |
+ `-- nếu không có boot.scr:
+         U-Boot dùng logic default:
+         load zImage + load DTB + bootz
+```
+
+### 14.5. Nếu không có boot.scr thì U-Boot load zImage và DTB như nào
+
+Default env có:
+
+```c
+"loadimage=fatload mmc ${mmcdev}:${mmcpart} ${loadaddr} ${image}\0"
+"loadfdt=fatload mmc ${mmcdev}:${mmcpart} ${fdt_addr} ${fdt_file}\0"
+```
+
+Nếu:
+
+```txt
+mmcdev=1
+mmcpart=1
+image=zImage
+```
+
+thì:
+
+```bash
+run loadimage
+```
+
+tương đương:
+
+```bash
+fatload mmc 1:1 ${loadaddr} zImage
+```
+
+Sau đó `mmcboot` chạy:
+
+```bash
+run mmcargs
+run loadfdt
+bootz ${loadaddr} - ${fdt_addr}
+```
+
+Trong đó:
+
+```txt
+mmcargs  set bootargs cho kernel
+loadfdt  load file DTB vào RAM
+bootz    nhảy vào kernel zImage
+```
+
+### 14.6. Liên hệ với file .wks
+
+File partition layout của em:
+
+```txt
+/home/quanghaictu/learn_yocto/imx-yocto-imx6ull/meta-okmx6ull/wic/okmx6ull-forlinx.wks
+```
+
+Trong đó:
+
+```wks
+part /boot --source bootimg-partition --ondisk mmcblk --fstype=vfat --label BOOT --active --align 8192 --size 120
+
+part / --source rootfs --ondisk mmcblk --fstype=ext4 --label rootfs_A --align 8192 --fixed-size 512M
+
+part --source rootfs --ondisk mmcblk --fstype=ext4 --label rootfs_B --align 8192 --fixed-size 512M
+```
+
+Nghĩa là image eMMC có layout:
+
+```txt
+mmc 1:1  /boot     FAT   chứa boot.scr, zImage, DTB
+mmc 1:2  rootfs_A  ext4  rootfs slot A
+mmc 1:3  rootfs_B  ext4  rootfs slot B
+```
+
+Nên khi U-Boot chạy:
+
+```bash
+fatload mmc 1:1 ${loadaddr} boot.scr
+fatload mmc 1:1 ${loadaddr} zImage
+fatload mmc 1:1 ${fdt_addr} ${fdt_file}
+```
+
+nó đang đọc từ partition `/boot` trong `.wks`.
+
+Còn rootfs kernel mount sau đó do `bootargs` quyết định, ví dụ:
+
+```txt
+root=/dev/mmcblk1p2
+```
+
+thì Linux mount rootfs slot A.
+
+Nếu muốn boot slot B thì logic boot phải đổi thành:
+
+```txt
+root=/dev/mmcblk1p3
+```
+
+Thường phần đổi slot A/B nên để trong `boot.scr` hoặc logic OTA, vì `boot.scr` dễ thay đổi hơn so với rebuild U-Boot.
+
+---
+
+## 15. Tóm tắt cuối
 
 Flow tạo `u-boot.imx`:
 
