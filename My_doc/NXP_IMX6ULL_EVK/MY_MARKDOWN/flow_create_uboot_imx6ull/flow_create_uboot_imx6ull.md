@@ -1543,50 +1543,42 @@ offset 0x042c  DCD
 offset 0x1000  U-Boot code / _start
 ```
 
-Theo địa chỉ DDR runtime sau khi full image được load:
+IVT field order theo offset trong image/buffer:
 
 ```txt
-0x877ff000  đầu image / BootData.start
-0x877ff400  IVT / header / self
-0x877ff420  Boot Data
-0x877ff42c  DCD
-0x87800000  entry / _start
+offset 0x0400  header        = 0x402000d1
+offset 0x0404  entry         = 0x87800000
+offset 0x0408  reserved1     = 0x00000000
+offset 0x040c  dcd_ptr       = 0x877ff42c
+offset 0x0410  boot_data_ptr = 0x877ff420
+offset 0x0414  self          = 0x877ff400
+offset 0x0418  csf           = 0x00000000
+offset 0x041c  reserved2     = 0x00000000
 ```
 
-IVT field order:
+Boot Data theo offset trong image/buffer:
 
 ```txt
-0x877ff400  header        = 0x402000d1
-0x877ff404  entry         = 0x87800000
-0x877ff408  reserved1     = 0x00000000
-0x877ff40c  dcd_ptr       = 0x877ff42c
-0x877ff410  boot_data_ptr = 0x877ff420
-0x877ff414  self          = 0x877ff400
-0x877ff418  csf           = 0x00000000
-0x877ff41c  reserved2     = 0x00000000
+offset 0x0420  boot_data.start  = 0x877ff000
+offset 0x0424  boot_data.size   = 0x0008d000
+offset 0x0428  boot_data.plugin = 0x00000000
 ```
 
-Boot Data:
+Cột bên trái chỉ biểu diễn vị trí byte tính từ đầu image hoặc initial
+buffer. Đây không phải địa chỉ OCRAM cụ thể và cũng không khẳng định dữ
+liệu đã nằm trong SDRAM.
 
-```txt
-0x877ff420  boot_data.start  = 0x877ff000
-0x877ff424  boot_data.size   = 0x0008d000
-0x877ff428  boot_data.plugin = 0x00000000
-```
+Cột bên phải là giá trị được mã hóa sẵn trong image. Các field `entry`,
+`dcd_ptr`, `boot_data_ptr`, `self` và `boot_data.start` chứa các địa chỉ
+thuộc layout SDRAM dự kiến sau khi DCD đã khởi tạo DDR và Boot ROM nạp
+image đầy đủ. Trước thời điểm đó, không được hiểu các giá trị này là vị
+trí mà Boot ROM đang trực tiếp đọc trong SDRAM.
 
 ---
 
 ## 13. Boot ROM dùng các thông tin này như nào
 
-Trước DCD, DDR chưa dùng được. Vì vậy Boot ROM không thể đọc trực tiếp các địa chỉ DDR như:
-
-```txt
-0x877ff400
-0x877ff42c
-0x87800000
-```
-
-Lúc đầu, với SD/eMMC, Boot ROM đọc initial region:
+Trước DCD, DDR chưa dùng được. Với SD/eMMC, Boot ROM đọc initial region:
 
 ```txt
 0x1000 bytes = 4KB
@@ -1602,7 +1594,8 @@ offset 0x420 = Boot Data
 offset 0x42c = DCD
 ```
 
-Boot ROM có thể suy ra offset từ các địa chỉ runtime:
+Quan hệ giữa các giá trị địa chỉ được mã hóa trong header cho phép xác
+định vị trí tương đối của từng cấu trúc trong image:
 
 ```txt
 IVT offset      = self          - BootData.start = 0x877ff400 - 0x877ff000 = 0x400
@@ -1611,13 +1604,14 @@ DCD offset      = dcd_ptr       - BootData.start = 0x877ff42c - 0x877ff000 = 0x4
 Entry offset    = entry         - BootData.start = 0x87800000 - 0x877ff000 = 0x1000
 ```
 
-Nên trước khi DDR sống:
+Trước khi DDR hoạt động, không nên hiểu:
 
 ```txt
 dcd_ptr = 0x877ff42c
 ```
 
-là địa chỉ runtime/DDR tương lai. Boot ROM dùng nó để suy ra:
+là địa chỉ mà Boot ROM đang dereference trực tiếp trong SDRAM. DCD hiện
+đang nằm trong initial buffer tại offset:
 
 ```txt
 DCD nằm tại offset 0x42c trong initial buffer OCRAM
