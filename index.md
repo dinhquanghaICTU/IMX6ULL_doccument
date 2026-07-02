@@ -34,6 +34,7 @@ Các tài liệu nên đọc trước:
 Các tài liệu đáng chú ý:
 
 - [`MY_MARKDOWN/`](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/) — Ghi chú tự tổng hợp theo workflow đang làm.
+- [Tối ưu tốc độ boot OKMX6ULL-S](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/custom_boot_speed/custom_boot_speed.md) — Các thay đổi U-Boot, `boot.scr`, rootfs, BusyBox, banner và service; kèm lý do lựa chọn, kết quả giảm image và danh sách file đã thao tác.
 - [Setup build image bằng Yocto/NXP](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/build_image/general_setup.md)
 - [Flow tạo `u-boot.imx` cho i.MX6ULL](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_create_uboot_imx6ull/flow_create_uboot_imx6ull.md) — Lần theo `defconfig`, `Kconfig`, `Makefile`, `mkimage`, `imximage.c`, IVT, Boot Data và DCD.
 - [Flow sau khi Boot ROM jump vào U-Boot `_start`](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_jump_uboot/flow_jump_uboot.md) — Lần theo `_start`, `start.S`, `crt0.S`, `board_init_f`, relocation, `board_init_r`, `main_loop`, `bootcmd`, `bootz/bootm` và jump vào kernel.
@@ -160,6 +161,12 @@ Nếu câu hỏi liên quan U-Boot chạy gì sau `_start`:
 1. Đọc [`My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_jump_uboot/flow_jump_uboot.md`](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_jump_uboot/flow_jump_uboot.md)
 2. Đọc [`My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_create_uboot_imx6ull/flow_create_uboot_imx6ull.md`](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_create_uboot_imx6ull/flow_create_uboot_imx6ull.md)
 3. Đọc [`My_doc/NXP_IMX6ULL_EVK/MARKDOWN_DOC_NXP/i.MX_6ULL_Applications_Processor_Reference_Manual/Chapter_8_System_Boot.md`](My_doc/NXP_IMX6ULL_EVK/MARKDOWN_DOC_NXP/i.MX_6ULL_Applications_Processor_Reference_Manual/Chapter_8_System_Boot.md)
+
+Nếu câu hỏi liên quan tối ưu thời gian boot, giảm U-Boot hoặc thu gọn rootfs:
+
+1. Đọc [`My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/custom_boot_speed/custom_boot_speed.md`](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/custom_boot_speed/custom_boot_speed.md)
+2. Đọc [`My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_jump_uboot/flow_jump_uboot.md`](My_doc/NXP_IMX6ULL_EVK/MY_MARKDOWN/flow_jump_uboot/flow_jump_uboot.md)
+3. Đọc [`Phu_doc/docs/yocto_docs/08h_building_images.md`](Phu_doc/docs/yocto_docs/08h_building_images.md)
 
 Nếu câu hỏi liên quan flash bằng UUU:
 
