@@ -15,7 +15,7 @@ PORT       = 8080
 FILE_PORT  = 8888
 OTA_DIR    = "/tmp/ota_files"
 
-MQTT_HOST  = "192.168.1.189"
+MQTT_HOST  = "192.168.1.244"
 MQTT_PORT  = "1883"
 MQTT_TOPIC = "test/topic"
 
