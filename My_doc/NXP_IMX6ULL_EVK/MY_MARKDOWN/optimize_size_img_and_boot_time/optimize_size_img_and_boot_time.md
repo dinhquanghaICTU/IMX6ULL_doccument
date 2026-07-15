@@ -89,8 +89,6 @@ Sau khi tối ưu, U-Boot đi thẳng vào eMMC bằng `mmc dev 1`, bỏ bớt c
 
 ![Sau khi tối ưu boot time U-Boot](./image/time_uboot_da_sua.jpeg)
 
-
-
 ## 2. Tối ưu kernel
 
 Sau khi U-Boot đọc DCD, khởi tạo SDRAM và load được `zImage` cùng `dtb` vào RAM, kernel bắt đầu chạy. Ở phần này, em tối ưu theo hai hướng:
@@ -488,7 +486,131 @@ fec_probe(struct platform_device *pdev)
 
 Kết luận: disable node trong DTS không trực tiếp xóa driver khỏi kernel, nhưng nó làm kernel không tạo `platform_device` cho node đó. Không có device thì không match driver, không gọi `.probe`, từ đó giảm thời gian khởi tạo ngoại vi không dùng.
 
-
 ## 3. Tối ưu rootfs
 
-> TODO: Bổ sung phần tối ưu rootfs.
+Ở phần rootfs, em tối ưu theo hai hướng chính:
+
+1. Tắt các thành phần BusyBox không dùng để giảm size rootfs.
+2. Tối ưu các thành phần khởi động trong rootfs để giảm boot time.
+
+### 3.1. Giảm size rootfs
+
+Em tắt bớt các applet BusyBox không dùng trong dự án để giảm dung lượng rootfs.
+
+#### Trước khi tối ưu rootfs
+
+> TODO: Bổ sung hình ảnh hoặc số liệu dung lượng rootfs trước khi tối ưu.
+
+#### Sau khi tối ưu rootfs
+
+> TODO: Bổ sung hình ảnh hoặc số liệu dung lượng rootfs sau khi tối ưu.
+
+Các thành phần đã tắt, lý do tắt và lợi ích mang lại có thể xem tại:
+
+```text
+https://1drv.ms/x/c/E90C81AC76767422/IQCql6jvnra5R734uUIjbfc6ARPCVJSzPIGtPtQPG13nDoY?e=LSzzWJ
+```
+
+### 3.2. Giảm boot time rootfs
+
+Đây là phần giúp giảm boot time nhiều nhất, khoảng `14 giây`.
+
+Boot time hiện tại sau khi tối ưu kernel:
+
+![Trước khi tối ưu rootfs](./image/time_kernel.jpeg)
+
+Boot time sau khi tối ưu rootfs:
+
+![Sau khi tối ưu rootfs](./image/time_rootfs.jpeg)
+
+#### 3.2.1. So sánh service OTA trước và sau khi tối ưu
+
+Ban đầu, service OTA chờ Wi-Fi khởi động xong rồi mới chạy app. Trong khoảng thời gian này, hệ thống phải chờ `wlan0` up interface và DHCP xin IP tự động, nên boot time bị tăng thêm khoảng `14 giây`.
+
+Nếu chạy app thủ công bằng cách nhét lệnh vào `local.conf`, hệ thống sẽ gặp các vấn đề:
+
+1. Board reboot thì app không tự chạy lại theo cơ chế service chuẩn.
+2. App crash thì không có service quản lý để restart.
+3. Khó kiểm tra trạng thái app đang chạy hay đã chết.
+4. Mỗi lần cần chạy lại phải SSH vào board và chạy tay.
+
+Vì vậy, app OTA vẫn nên được quản lý bằng `systemd service`, nhưng cần tối ưu lại dependency và flow khởi động.
+
+| Nội dung | Service trước khi sửa | Service sau khi sửa |
+| --- | --- | --- |
+| Thời điểm chạy app | Chạy sau `wlan0-autostart.service` và `mosquitto.service` | Chạy sớm sau `local-fs.target`, trước `multi-user.target` |
+| Phụ thuộc Wi-Fi | Có, service chờ có default route mới chạy app | Không chờ Wi-Fi trong service |
+| Điểm gây chậm | `ExecStartPre` loop chờ network tối đa `30 giây` | Bỏ bước chờ network |
+| Restart khi crash | Restart sau `3 giây`, chạy lại cả `ExecStartPre` | Restart sau `2 giây`, không bị chờ network lại |
+| Xử lý lỗi khởi động | Không có service rollback riêng | Có `OnFailure=ota-app-rollback.service` |
+| Kết quả | Boot bị kéo dài do chờ Wi-Fi/DHCP | App được gọi sớm hơn, giảm boot time rootfs |
+
+Service cũ trước khi tối ưu:
+
+```ini
+[Unit]
+Description=HNN OKM6ULL OTA Application
+After=wlan0-autostart.service mosquitto.service
+Wants=wlan0-autostart.service
+
+[Service]
+Type=simple
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do ip route | grep -q default && exit 0; sleep 1; done; exit 1'
+ExecStart=/usr/bin/mqtt_led_app
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Flow service cũ:
+
+```text
+Board boot
+ -> systemd chạy tới multi-user.target
+ -> chờ wlan0-autostart.service
+ -> chờ Wi-Fi up interface
+ -> chờ DHCP xin IP
+ -> ExecStartPre kiểm tra default route
+ -> có network mới chạy mqtt_led_app
+```
+
+Nhược điểm của service cũ là app OTA bị phụ thuộc vào Wi-Fi. Nếu Wi-Fi hoặc DHCP chậm, app cũng bị chạy chậm theo. Khi app crash, `systemd` restart service và chạy lại `ExecStartPre`, nên vẫn có thể bị chờ network thêm lần nữa.
+
+Service mới sau khi tối ưu:
+
+```ini
+[Unit]
+Description=HNN OKM6ULL OTA Application
+DefaultDependencies=no
+After=local-fs.target
+Before=multi-user.target
+OnFailure=ota-app-rollback.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/mqtt_led_app
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Flow service mới:
+
+```text
+Board boot
+ -> local-fs.target sẵn sàng
+ -> systemd gọi mqtt_led_app sớm
+ -> app tự xử lý trạng thái network bên trong
+ -> nếu app lỗi thì systemd restart sau 2 giây
+ -> nếu lỗi nhiều lần thì gọi ota-app-rollback.service
+```
+
+Sau khi sửa, service không còn chờ Wi-Fi/DHCP ở tầng `systemd`. Nhờ đó app OTA được gọi sớm hơn, phần chờ network được chuyển vào logic app, và boot time rootfs giảm được khoảng `14 giây`.
