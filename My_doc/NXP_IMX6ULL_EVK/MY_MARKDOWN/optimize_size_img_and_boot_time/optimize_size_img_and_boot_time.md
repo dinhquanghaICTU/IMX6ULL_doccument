@@ -614,3 +614,111 @@ Board boot
 ```
 
 Sau khi sửa, service không còn chờ Wi-Fi/DHCP ở tầng `systemd`. Nhờ đó app OTA được gọi sớm hơn, phần chờ network được chuyển vào logic app, và boot time rootfs giảm được khoảng `14 giây`.
+
+#### 3.2.2. Tiếp tục Optimize target xuống ~3s (Chuyển đổi sang SysVinit)
+
+- Lần này em không sử dụng `systemd` để khởi tạo task vì các nguyên nhân khiến `systemd` chạy chậm trên con board này là:
+    + **Phần cứng đơn nhân (Single-core):** Board này chạy chip ARM Cortex-A7 (Single-core @ 696MHz), kiểu khởi tạo task của Systemd là cố gắng chạy song song (Parallelization). Vì chỉ có 1 nhân CPU nên hệ điều hành phải chuyển qua chuyển lại các task liên tục (Context Switching Overhead), dẫn đến mất nhiều thời gian khởi động (Có thể kiểm tra trong [Data Sheet NXP i.MX6ULL](https://www.nxp.com/docs/en/data-sheet/IMX6ULAEC.pdf)).
+    
+    + **Nghẽn CPU do duyệt cây đồ thị liên tục:** Mỗi khi 1 phần cứng được phát hiện (ví dụ: eMMC mount xong), Systemd phải chạy thuật toán duyệt toàn bộ cây đồ thị để tính toán xem node tiếp theo nào đủ điều kiện để kích hoạt. Quá trình tính toán đồ thị này diễn ra liên tục, làm CPU 1 nhân của i.MX6ULL bị nghẽn.
+    
+    + **Tốn nhiều RAM để khởi tạo:** Bản chất Systemd được thiết kế theo mô hình hướng đối tượng (Object-oriented). Mỗi Unit (`.service`, `.target`, `.socket`, `.device`) được cấp phát thành một Node (struct C) trong RAM.
+
+> **Mã nguồn thực tế trích từ Systemd Core (`src/core/load-fragment.c`):**  
+> *(Đường dẫn git trên máy: `/home/quanghaictu/yocto/imx-yocto-kirkstone/downloads/git2/github.com.systemd.systemd-stable.git`)*
+
+```c
+/* Hàm phân tích cú pháp dependencies (After=, Before=, OnFailure=) và móc nối các Node vào cây trong RAM */
+int config_parse_unit_deps(
+            const char *unit,
+            const char *filename,
+            unsigned line,
+            const char *section,
+            unsigned section_line,
+            const char *lvalue,
+            int ltype,
+            const char *rvalue,
+            void *data,
+            void *userdata) {
+
+    UnitDependency d = ltype;   /* Loại quan hệ: UNIT_AFTER, UNIT_BEFORE, UNIT_ON_FAILURE... */
+    Unit *u = userdata;         /* Node hiện tại đại diện cho file .service trong RAM */
+
+    assert(filename);
+    assert(lvalue);
+    assert(rvalue);
+
+    /* Vòng lặp duyệt qua từng từ trong chuỗi rvalue (ví dụ: "local-fs.target network.target") */
+    for (const char *p = rvalue;;) {
+            _cleanup_free_ char *word = NULL, *k = NULL;
+            int r;
+
+            /*  Bóc tách lần lượt từng tên Unit trong chuỗi */
+            r = extract_first_word(&p, &word, NULL, EXTRACT_RETAIN_ESCAPE);
+            if (r == 0)
+                    return 0; /* Hết từ -> hoàn tất phân tích dòng */
+            if (r == -ENOMEM)
+                    return log_oom();
+            if (r < 0) {
+                    log_syntax(unit, LOG_WARNING, filename, line, r, "Invalid syntax, ignoring: %s", rvalue);
+                    return 0;
+            }
+
+            /* Giải mã các ký tự định dạng %i, %n nếu có */
+            r = unit_name_printf(u, word, &k);
+            if (r < 0) {
+                    log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to resolve unit specifiers in '%s', ignoring: %m", word);
+                    continue;
+            }
+
+            /*  Tránh vòng lặp đệ quy vô tận làm treo hệ thống */
+            r = unit_is_likely_recursive_template_dependency(u, k, word);
+            if (r < 0) {
+                    log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to determine if '%s' is a recursive dependency, ignoring: %m", k);
+                    continue;
+            }
+            if (r > 0) {
+                    log_syntax(unit, LOG_DEBUG, filename, line, 0,
+                               "Dropping dependency %s=%s that likely leads to infinite recursion.",
+                               unit_dependency_to_string(d), word);
+                    continue;
+            }
+
+            Tìm kiếm Node đích trong RAM (nếu chưa có thì tạo mới) và gắn con trỏ nối vào cây */
+            r = unit_add_dependency_by_name(u, d, k, true, UNIT_DEPENDENCY_FILE);
+            if (r < 0)
+                    log_syntax(unit, LOG_WARNING, filename, line, r, "Failed to add dependency on %s, ignoring: %m", k);
+    }
+}
+
+
+---
+
+### 3.2.3. Chuyển đổi sang SysVinit & Phân tích Luồng Mã Nguồn Thực Tế
+
+=> Thế nên em chuyển sang **SysVinit (kết hợp BusyBox)** với các ưu điểm cốt lõi:
+- **Thực thi tuần tự, xác định (Sequential Execution):** SysVinit chạy theo kiểu tuần tự tuyến tính. Thứ tự thực hiện được thiết lập cứng bằng số thứ tự (`S01`, `S02`...), giúp CPU đơn nhân Cortex-A7 chạy thẳng 1 mạch mà không bị nghẽn do chuyển đổi ngữ cảnh.
+- **Tiết kiệm tối đa bộ nhớ RAM:** SysVinit không duy trì các daemon ngầm cồng kềnh như Systemd (`systemd-journald`, `systemd-udevd`, `dbus-daemon`), chỉ tiêu tốn chưa đến **1MB RAM** (thay vì 25MB - 35MB RAM của Systemd).
+
+---
+
+#### 🔍 Dẫn chứng mã nguồn: Cả hai đều bắt đầu từ Kernel Init sau khi Mount Rootfs
+
+Cả **Systemd** và **SysVinit** đều có cùng một điểm xuất phát từ Kernel sau khi phân vùng eMMC được mount thành công:
+
+##### 1. Tầng Linux Kernel: Bàn giao quyền sang User-Space (`/sbin/init`)
+📁 **File:** `kernel-source/init/main.c` *(Dòng 1564 - 1568)*
+
+```c
+/* Trích từ init/main.c */
+static int __ref kernel_init(void *unused) {
+    ...
+    /* Kernel lần lượt tìm và thực thi tiến trình PID 1 đầu tiên trên Rootfs */
+    if (!try_to_run_init_process("/sbin/init") ||
+        !try_to_run_init_process("/etc/init")  ||
+        !try_to_run_init_process("/bin/init")  ||
+        !try_to_run_init_process("/bin/sh"))
+        return 0;
+
+    panic("No working init found. Try passing init= option to kernel.");
+}
